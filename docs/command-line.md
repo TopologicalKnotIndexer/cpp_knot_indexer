@@ -99,3 +99,10 @@ The executable uses internal worker options when spawning itself:
 
 These options are implementation details and are not intended as the public
 user interface.
+
+## Auxiliary Tools
+
+The coordinate conversion tools have separate executables and documentation:
+
+- [che_to_coord](che-to-coord.md)
+- [link_pd_code](link-pd-code.md)

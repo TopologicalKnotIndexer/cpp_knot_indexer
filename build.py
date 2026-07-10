@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pure C++ knot indexer with a g++-style compiler."""
+"""Build the pure C++ knot tools with a g++-style compiler."""
 
 from __future__ import annotations
 
@@ -16,12 +16,27 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
-TARGET_NAME = f"cpp_knot_indexer{EXE_SUFFIX}"
 
-CPP_SOURCES = [
-    "src/knot_indexer/main.cpp",
-    "third_party/cppkh/cppkh_main.cpp",
-]
+TARGET_OUTPUTS = {
+    "knot_indexer": "cpp_knot_indexer",
+    "che_to_coord": "che_to_coord",
+    "link_pd_code": "link_pd_code",
+}
+
+TARGET_SOURCES = {
+    "knot_indexer": [
+        "src/knot_indexer/main.cpp",
+        "third_party/cppkh/cppkh_main.cpp",
+    ],
+    "che_to_coord": [
+        "src/che_to_coord/che_to_coord.cpp",
+    ],
+    "link_pd_code": [
+        "src/link_pd_code/link_pd_code.cpp",
+    ],
+}
+
+DEFAULT_TARGETS = ["knot_indexer", "che_to_coord", "link_pd_code"]
 
 LIBHOMFLY_SOURCES = [
     "third_party/libhomfly/bound.c",
@@ -142,6 +157,8 @@ def build_flags(args: argparse.Namespace, cxx: list[str]) -> tuple[list[str], li
 
     flags += [
         "-I", str(ROOT / "src" / "knot_indexer"),
+        "-I", str(ROOT / "src" / "che_to_coord"),
+        "-I", str(ROOT / "src" / "link_pd_code"),
         "-I", str(ROOT / "third_party/libhomfly"),
     ]
 
@@ -175,8 +192,15 @@ def build_flags(args: argparse.Namespace, cxx: list[str]) -> tuple[list[str], li
     return flags, link_flags
 
 
-def source_args() -> list[str]:
-    args = [str(ROOT / src) for src in CPP_SOURCES]
+def executable_name(target: str) -> str:
+    return TARGET_OUTPUTS[target] + EXE_SUFFIX
+
+
+def source_args(target: str) -> list[str]:
+    args = [str(ROOT / src) for src in TARGET_SOURCES[target]]
+    if target != "knot_indexer":
+        return args
+
     # libhomfly is C source, but this project compiles it as C++ so it can be
     # linked in one pass with the C++ executable and the local gc.h shim.
     args += ["-x", "c++"]
@@ -203,10 +227,12 @@ def copy_data_folder(output: Path) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Build cpp_knot_indexer with g++/clang++.")
+    parser = argparse.ArgumentParser(description="Build the C++ knot tool executables with g++/clang++.")
+    parser.add_argument("--target", choices=["all", *DEFAULT_TARGETS], default="all",
+                        help="Executable to build. Default: all.")
     parser.add_argument("--cxx", help="C++ compiler command, e.g. g++, clang++, or /path/to/g++.")
     parser.add_argument("--build-dir", default=str(ROOT / "build"), help="Build output directory.")
-    parser.add_argument("--output", help="Output executable path.")
+    parser.add_argument("--output", help="Output executable path. Only valid with a single --target.")
     parser.add_argument("--debug", action="store_true", help="Build with -O0 -g.")
     parser.add_argument("--portable", "--no-native", action="store_true",
                         help="Disable -march=native/-mtune=native for portable binaries.")
@@ -220,24 +246,33 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def main() -> int:
-    args = parse_args()
-    cxx = find_compiler(args.cxx)
-    version = compiler_version(cxx).splitlines()[0]
+def selected_targets(args: argparse.Namespace) -> list[str]:
+    if args.target == "all":
+        if args.output:
+            raise SystemExit("ERROR: --output can only be used with --target knot_indexer, "
+                             "--target che_to_coord, or --target link_pd_code")
+        return list(DEFAULT_TARGETS)
+    return [args.target]
 
-    build_dir = Path(args.build_dir).resolve()
-    output = Path(args.output).resolve() if args.output else build_dir / TARGET_NAME
-    if args.clean and build_dir.exists():
-        shutil.rmtree(build_dir)
-    build_dir.mkdir(parents=True, exist_ok=True)
+
+def output_path(args: argparse.Namespace, build_dir: Path, target: str) -> Path:
+    if args.output:
+        return Path(args.output).resolve()
+    return build_dir / executable_name(target)
+
+
+def build_target(args: argparse.Namespace,
+                 cxx: list[str],
+                 flags: list[str],
+                 link_flags: list[str],
+                 target: str,
+                 build_dir: Path) -> int:
+    output = output_path(args, build_dir, target)
     output.parent.mkdir(parents=True, exist_ok=True)
+    cmd = cxx + flags + source_args(target) + ["-o", str(output)] + link_flags
 
-    flags, link_flags = build_flags(args, cxx)
-    cmd = cxx + flags + source_args() + ["-o", str(output)] + link_flags
-
-    print(f"INFO: compiler: {version}")
+    print(f"INFO: target: {target}")
     print(f"INFO: output: {output}")
-    print("INFO: optimization: " + ("debug" if args.debug else "release"))
     if args.show_command:
         print(command_display(cmd))
 
@@ -245,8 +280,32 @@ def main() -> int:
     if proc.returncode != 0:
         return proc.returncode
 
-    copy_data_folder(output)
+    if target == "knot_indexer":
+        copy_data_folder(output)
     print(f"INFO: built {output}")
+    return 0
+
+
+def main() -> int:
+    args = parse_args()
+    cxx = find_compiler(args.cxx)
+    version = compiler_version(cxx).splitlines()[0]
+    targets = selected_targets(args)
+
+    build_dir = Path(args.build_dir).resolve()
+    if args.clean and build_dir.exists():
+        shutil.rmtree(build_dir)
+    build_dir.mkdir(parents=True, exist_ok=True)
+
+    flags, link_flags = build_flags(args, cxx)
+
+    print(f"INFO: compiler: {version}")
+    print("INFO: optimization: " + ("debug" if args.debug else "release"))
+
+    for target in targets:
+        result = build_target(args, cxx, flags, link_flags, target, build_dir)
+        if result != 0:
+            return result
     return 0
 
 

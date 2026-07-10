@@ -2,8 +2,8 @@
 
 The project intentionally uses a Python build wrapper instead of CMake. The
 wrapper detects a g++-style compiler, probes optimization flags, compiles the
-pure C++ executable, and refreshes the runtime data folder next to the output
-binary.
+pure C++ executables, and refreshes the runtime data folder next to the main
+knot indexer binary.
 
 Most reusable project code is implemented in inline `.hpp` headers. The build
 therefore compiles the command line entrypoint plus vendored computation
@@ -12,10 +12,26 @@ executable build.
 
 ## Build Script
 
-Run the default release build:
+Run the default release build. This builds all three executables:
+`cpp_knot_indexer`, `che_to_coord`, and `link_pd_code`.
 
 ```sh
 python build.py
+```
+
+Build one executable:
+
+```sh
+python build.py --target knot_indexer
+python build.py --target che_to_coord
+python build.py --target link_pd_code
+```
+
+The auxiliary modules also provide convenience wrappers:
+
+```sh
+python src/che_to_coord/build.py
+python src/link_pd_code/build.py
 ```
 
 Select a compiler:
@@ -38,9 +54,14 @@ The compiler is resolved in this order:
 
 Set the build output directory. The default is `build`.
 
+`--target all|knot_indexer|che_to_coord|link_pd_code`
+
+Select the executable to build. The default is `all`.
+
 `--output PATH`
 
-Set the exact executable output path.
+Set the exact executable output path. This is only valid when building one
+target.
 
 `--debug`
 
@@ -107,9 +128,10 @@ The script also probes whether `std::filesystem` needs `-lstdc++fs`.
 
 ## Data Folder Packaging
 
-After a successful build, `build.py` copies the repository `data` folder next to
-the executable. If a previous `data` folder already exists beside the output
-binary, it is removed first and then copied again.
+After a successful `knot_indexer` build, `build.py` copies the repository
+`data` folder next to the `cpp_knot_indexer` executable. If a previous `data`
+folder already exists beside the output binary, it is removed first and then
+copied again.
 
 This keeps the executable independent from hard-coded embedded data. Users can
 replace the runtime database by passing `--data-folder PATH`, or by replacing
@@ -124,8 +146,9 @@ python test.py --rebuild
 ```
 
 The test script builds the executable if needed, runs smoke and regression
-checks, verifies data folder behavior, checks timeout argument handling, and
-compiles the auxiliary coordinate modules as standalone C++17 code.
+checks, verifies data folder behavior, checks timeout argument handling,
+compiles the auxiliary coordinate modules as standalone C++17 headers, and
+checks that the default build creates all three executables.
 
 Useful options:
 

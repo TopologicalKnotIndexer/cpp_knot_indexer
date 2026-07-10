@@ -30,4 +30,12 @@ upstream-style degenerate component encoding.
 
 This module is intentionally not linked into the main knot indexer executable
 yet. Include `link_pd_code.hpp` directly to use the header-only implementation.
-`link_pd_code.cpp` is only a compatibility translation unit.
+`link_pd_code.cpp` contains the standalone command line interface.
+
+Build it with:
+
+```sh
+python src/link_pd_code/build.py
+```
+
+See `docs/link-pd-code.md` for the command line contract.

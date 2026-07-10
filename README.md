@@ -36,3 +36,5 @@ Detailed documentation:
 - [Packaging](docs/packaging.md)
 - [Algorithms](docs/algorithms.md)
 - [Modules](docs/modules.md)
+- [che_to_coord](docs/che-to-coord.md)
+- [link_pd_code](docs/link-pd-code.md)

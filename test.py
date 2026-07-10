@@ -16,6 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 DEFAULT_EXE = ROOT / "build" / f"cpp_knot_indexer{EXE_SUFFIX}"
+CHE_TO_COORD_EXE = f"che_to_coord{EXE_SUFFIX}"
+LINK_PD_CODE_EXE = f"link_pd_code{EXE_SUFFIX}"
 
 
 CASES = [
@@ -75,7 +77,7 @@ def run(cmd: list[str], *, stdin: str | None = None, timeout: int = 60) -> subpr
 def build_if_needed(exe: Path, cxx: str | None, rebuild: bool, portable: bool) -> None:
     if exe.exists() and not rebuild:
         return
-    cmd = [sys.executable, str(ROOT / "build.py"), "--output", str(exe)]
+    cmd = [sys.executable, str(ROOT / "build.py"), "--target", "knot_indexer", "--output", str(exe)]
     if cxx:
         cmd += ["--cxx", cxx]
     if portable:
@@ -375,6 +377,102 @@ Bonds
             )
 
 
+def assert_default_builds_all_tools(cxx_arg: str | None, portable: bool) -> None:
+    with tempfile.TemporaryDirectory(prefix="cki_build_all_") as tmp:
+        build_dir = Path(tmp) / "build"
+        cmd = [sys.executable, str(ROOT / "build.py"), "--build-dir", str(build_dir)]
+        if cxx_arg:
+            cmd += ["--cxx", cxx_arg]
+        if portable:
+            cmd += ["--portable"]
+        proc = run(cmd, timeout=480)
+        if proc.returncode != 0:
+            raise AssertionError(f"default all-target build failed\nstdout={proc.stdout}\nstderr={proc.stderr}")
+
+        knot_exe = build_dir / f"cpp_knot_indexer{EXE_SUFFIX}"
+        che_exe = build_dir / CHE_TO_COORD_EXE
+        link_exe = build_dir / LINK_PD_CODE_EXE
+        missing = [str(path) for path in [knot_exe, che_exe, link_exe] if not path.exists()]
+        if missing:
+            raise AssertionError(f"default build did not create all executables: {missing}")
+        assert_data_folder(build_dir / "data")
+
+        molecule = r'''
+LAMMPS data file
+
+4 atoms
+4 bonds
+
+Atoms
+
+1 0 0 0
+2 1 0 0
+3 1 1 0
+4 0 1 0
+
+Bonds
+
+1 1 1 2
+2 1 2 3
+3 1 3 4
+4 1 4 1
+'''
+        che = run([str(che_exe)], stdin=molecule, timeout=30)
+        if che.returncode != 0:
+            raise AssertionError(f"che_to_coord executable failed\nstdout={che.stdout}\nstderr={che.stderr}")
+        che_lines = [line.strip() for line in che.stdout.splitlines() if line.strip()]
+        if len(che_lines) != 6 or che_lines[0] != "1" or che_lines[1] != "4":
+            raise AssertionError(f"unexpected che_to_coord link output: {che.stdout!r}")
+
+        atom_id = run([str(che_exe), "--format", "atom-id"], stdin=molecule, timeout=30)
+        if atom_id.returncode != 0 or not atom_id.stdout.lstrip().startswith("1 "):
+            raise AssertionError(
+                f"che_to_coord atom-id output failed\nstdout={atom_id.stdout}\nstderr={atom_id.stderr}"
+            )
+
+        square_pd = run([str(link_exe), "--direction", "0", "0", "1"], stdin=che.stdout, timeout=30)
+        if square_pd.returncode != 0 or square_pd.stdout.strip() != "[]":
+            raise AssertionError(
+                f"link_pd_code planar square failed\nstdout={square_pd.stdout}\nstderr={square_pd.stderr}"
+            )
+
+        crossing_link = """1
+4
+-1 -1 0
+1 1 0
+1 -1 1
+-1 1 1
+"""
+        crossing_pd = run(
+            [str(link_exe), "--direction", "0", "0", "1", "--first-generic"],
+            stdin=crossing_link,
+            timeout=30,
+        )
+        if crossing_pd.returncode != 0 or not crossing_pd.stdout.strip().startswith("[["):
+            raise AssertionError(
+                f"link_pd_code crossing output failed\nstdout={crossing_pd.stdout}\nstderr={crossing_pd.stderr}"
+            )
+
+        wrapper_dir = Path(tmp) / "wrapper-build"
+        for script, exe_name in [
+            (ROOT / "src" / "che_to_coord" / "build.py", CHE_TO_COORD_EXE),
+            (ROOT / "src" / "link_pd_code" / "build.py", LINK_PD_CODE_EXE),
+        ]:
+            wrapper_cmd = [sys.executable, str(script), "--build-dir", str(wrapper_dir)]
+            if cxx_arg:
+                wrapper_cmd += ["--cxx", cxx_arg]
+            if portable:
+                wrapper_cmd += ["--portable"]
+            wrapper = run(wrapper_cmd, timeout=240)
+            if wrapper.returncode != 0:
+                raise AssertionError(
+                    f"module wrapper build failed for {script}\n"
+                    f"stdout={wrapper.stdout}\nstderr={wrapper.stderr}"
+                )
+            if not (wrapper_dir / exe_name).exists():
+                raise AssertionError(f"module wrapper did not create {wrapper_dir / exe_name}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run pure C++ indexer smoke tests.")
     parser.add_argument("--exe", default=str(DEFAULT_EXE), help="Executable to test.")
@@ -405,6 +503,8 @@ def main() -> int:
     print("PASS timeout-cli-contract")
     assert_auxiliary_modules(args.cxx)
     print("PASS auxiliary-modules")
+    assert_default_builds_all_tools(args.cxx, args.portable)
+    print("PASS default-build-all-tools")
     return 0
 
 

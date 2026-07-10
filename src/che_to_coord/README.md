@@ -16,4 +16,12 @@ where possible.
 
 This module is intentionally not linked into the main knot indexer executable
 yet. Include `che_to_coord.hpp` directly to use the header-only implementation.
-`che_to_coord.cpp` is only a compatibility translation unit.
+`che_to_coord.cpp` contains the standalone command line interface.
+
+Build it with:
+
+```sh
+python src/che_to_coord/build.py
+```
+
+See `docs/che-to-coord.md` for the command line contract.

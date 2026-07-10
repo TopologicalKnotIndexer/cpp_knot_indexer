@@ -19,20 +19,20 @@ Reusable code in this directory is exposed through `.hpp` headers. The main
 
 Standalone molecule-data-to-coordinate library. It parses molecule files with
 `Atoms` and `Bonds` sections and returns a validated ordered 3D coordinate
-cycle. This module is not linked into the main executable yet.
+cycle. It also has its own `che_to_coord` command line executable.
 
 Use `#include "che_to_coord.hpp"` to consume the library directly. The matching
-`.cpp` file is a compatibility translation unit only.
+`.cpp` file contains only the command line interface.
 
 `src/link_pd_code`
 
 Standalone 3D-coordinate-to-PD-code library derived from
 `GGN-2015/link-pd-code` under the MIT license. It supports one or more ordered
 closed polygon components. This module is not linked into the main executable
-yet.
+yet, and it also has its own `link_pd_code` command line executable.
 
 Use `#include "link_pd_code.hpp"` to consume the library directly. The matching
-`.cpp` file is a compatibility translation unit only.
+`.cpp` file contains only the command line interface.
 
 `third_party/cppkh`
 
@@ -106,6 +106,11 @@ Important API types and functions:
 - `positionsOnly`
 - `formatCoordinateLoop`
 
+`che_to_coord.cpp`
+
+Standalone command line entrypoint for reading molecule data from a file or
+stdin and writing ordered 3D coordinates.
+
 `link_pd_code.hpp`
 
 Public namespace: `cki::link_pd_code`.
@@ -123,6 +128,11 @@ Important API types and functions:
 - `computePDCode`
 - `validatePDCode`
 - `formatPDCode`
+
+`link_pd_code.cpp`
+
+Standalone command line entrypoint for reading ordered 3D link coordinates from
+a file or stdin and writing a PD code.
 
 ## Citation
 
