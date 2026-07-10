@@ -12,11 +12,17 @@ Main executable code. This includes PD parsing, worker process orchestration,
 HOMFLY-PT integration, Khovanov integration, data lookup, timeout handling, and
 interrupt handling.
 
+Reusable code in this directory is exposed through `.hpp` headers. The main
+`.cpp` file is the command line entrypoint.
+
 `src/che_to_coord`
 
 Standalone molecule-data-to-coordinate library. It parses molecule files with
 `Atoms` and `Bonds` sections and returns a validated ordered 3D coordinate
 cycle. This module is not linked into the main executable yet.
+
+Use `#include "che_to_coord.hpp"` to consume the library directly. The matching
+`.cpp` file is a compatibility translation unit only.
 
 `src/link_pd_code`
 
@@ -24,6 +30,9 @@ Standalone 3D-coordinate-to-PD-code library derived from
 `GGN-2015/link-pd-code` under the MIT license. It supports one or more ordered
 closed polygon components. This module is not linked into the main executable
 yet.
+
+Use `#include "link_pd_code.hpp"` to consume the library directly. The matching
+`.cpp` file is a compatibility translation unit only.
 
 `third_party/cppkh`
 
@@ -45,32 +54,32 @@ Project documentation beyond the README QuickStart.
 
 ## Main Indexer Components
 
-`database.*`
+`database.hpp`
 
 Loads invariant-to-name maps and normalizes knot names through
 `knotname-reg`.
 
-`pd_code.*`
+`pd_code.hpp`
 
 Parses and formats PD codes, validates labels, canonicalizes label numbering,
 and provides the PD representation used by invariant workers.
 
-`homfly_backend.*`
+`homfly_backend.hpp`
 
 Converts parsed PD data into the form expected by the HOMFLY engine and formats
 the resulting polynomial for database lookup.
 
-`khovanov_backend.*`
+`khovanov_backend.hpp`
 
 Connects parsed PD data to the vendored `cppkh` computation path and formats
 the resulting integral Khovanov invariant.
 
-`process_runner.*`
+`process_runner.hpp`
 
 Spawns worker processes, enforces per-worker timeout limits, captures stdout
 and stderr, and reports worker status to the main process.
 
-`runtime_control.*`
+`runtime_control.hpp`
 
 Installs interrupt handlers and exposes the shared interrupted state used for
 clean `Ctrl+C` shutdown.
@@ -82,7 +91,7 @@ entrypoint, invariant lookup, and final stdout/stderr output contract.
 
 ## Auxiliary Coordinate Modules
 
-`che_to_coord.h` and `che_to_coord.cpp`
+`che_to_coord.hpp`
 
 Public namespace: `cki::che_to_coord`.
 
@@ -97,7 +106,7 @@ Important API types and functions:
 - `positionsOnly`
 - `formatCoordinateLoop`
 
-`link_pd_code.h` and `link_pd_code.cpp`
+`link_pd_code.hpp`
 
 Public namespace: `cki::link_pd_code`.
 

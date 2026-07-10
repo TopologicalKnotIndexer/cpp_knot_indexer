@@ -19,13 +19,7 @@ EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 TARGET_NAME = f"cpp_knot_indexer{EXE_SUFFIX}"
 
 CPP_SOURCES = [
-    "src/knot_indexer/database.cpp",
-    "src/knot_indexer/homfly_backend.cpp",
-    "src/knot_indexer/khovanov_backend.cpp",
     "src/knot_indexer/main.cpp",
-    "src/knot_indexer/pd_code.cpp",
-    "src/knot_indexer/process_runner.cpp",
-    "src/knot_indexer/runtime_control.cpp",
     "third_party/cppkh/cppkh_main.cpp",
 ]
 

@@ -15,4 +15,5 @@ non-cycle graphs raise `cki::che_to_coord::ParseError` with a line-aware message
 where possible.
 
 This module is intentionally not linked into the main knot indexer executable
-yet. It is compiled by `test.py` as a standalone auxiliary module check.
+yet. Include `che_to_coord.hpp` directly to use the header-only implementation.
+`che_to_coord.cpp` is only a compatibility translation unit.

@@ -1,9 +1,9 @@
-#include "database.h"
-#include "homfly_backend.h"
-#include "khovanov_backend.h"
-#include "pd_code.h"
-#include "process_runner.h"
-#include "runtime_control.h"
+#include "database.hpp"
+#include "homfly_backend.hpp"
+#include "khovanov_backend.hpp"
+#include "pd_code.hpp"
+#include "process_runner.hpp"
+#include "runtime_control.hpp"
 
 #include <algorithm>
 #include <chrono>

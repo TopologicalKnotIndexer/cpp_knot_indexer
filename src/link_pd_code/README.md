@@ -29,4 +29,5 @@ unknot returns `[]`. Set `Options::encode_isolated_components` to reproduce the
 upstream-style degenerate component encoding.
 
 This module is intentionally not linked into the main knot indexer executable
-yet. It is compiled by `test.py` as a standalone auxiliary module check.
+yet. Include `link_pd_code.hpp` directly to use the header-only implementation.
+`link_pd_code.cpp` is only a compatibility translation unit.

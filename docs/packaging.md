@@ -5,6 +5,11 @@ wrapper detects a g++-style compiler, probes optimization flags, compiles the
 pure C++ executable, and refreshes the runtime data folder next to the output
 binary.
 
+Most reusable project code is implemented in inline `.hpp` headers. The build
+therefore compiles the command line entrypoint plus vendored computation
+backends; compatibility `.cpp` files in `src/*` are not required by the default
+executable build.
+
 ## Build Script
 
 Run the default release build:

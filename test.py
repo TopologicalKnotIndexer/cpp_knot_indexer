@@ -200,8 +200,6 @@ def auxiliary_compile_command(cxx: list[str], source: Path, output: Path, extra_
         "-I", str(ROOT / "src" / "che_to_coord"),
         "-I", str(ROOT / "src" / "link_pd_code"),
         str(source),
-        str(ROOT / "src" / "che_to_coord" / "che_to_coord.cpp"),
-        str(ROOT / "src" / "link_pd_code" / "link_pd_code.cpp"),
         "-o", str(output),
     ] + extra_link
 
@@ -214,8 +212,8 @@ def assert_auxiliary_modules(cxx_arg: str | None) -> None:
         source = tmp_path / "auxiliary_test.cpp"
         output = tmp_path / ("auxiliary_test" + EXE_SUFFIX)
         source.write_text(r'''
-#include "che_to_coord.h"
-#include "link_pd_code.h"
+#include "che_to_coord.hpp"
+#include "link_pd_code.hpp"
 
 #include <iostream>
 #include <stdexcept>
