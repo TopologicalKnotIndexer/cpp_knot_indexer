@@ -7,7 +7,7 @@ runtime.
 
 The project carries its own:
 
-- C++ source files
+- C++ source files under `src/`
 - Python build and test scripts
 - vendored HOMFLY-PT and Khovanov computation code
 - invariant lookup data under `data/`
