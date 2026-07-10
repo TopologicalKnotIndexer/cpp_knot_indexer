@@ -40,13 +40,16 @@ python build.py --show-command
 ```
 
 The target executable is written to `build/cpp_knot_indexer` or
-`build/cpp_knot_indexer.exe` on Windows.
+`build/cpp_knot_indexer.exe` on Windows. After a successful build, `build.py`
+also refreshes `data/` next to the executable: an existing `build/data` folder
+is removed, then the project `data/` folder is copied there.
 
 ## Usage
 
 ```sh
 build/cpp_knot_indexer --pd-code "[[1,5,2,4],[3,1,4,6],[5,3,6,2]]" --timeout 60
 build/cpp_knot_indexer --pd-file pd_code.txt --timeout 60 --verbose
+build/cpp_knot_indexer --pd-file pd_code.txt --data-folder /path/to/my-database
 ```
 
 `--timeout SEC` applies independently to the Khovanov worker and the HOMFLY-PT
@@ -65,15 +68,23 @@ unoriented or relabeled PD codes for knots, including whole-component reversed
 inputs that make SageMath's orientation-sensitive path produce the mirror
 polynomial.
 
-By default, the executable locates invariant databases from this independent
-tree:
+By default, the executable looks for a folder literally named `data` in two
+places, in this order:
 
-- `data/homfly/sorted_HOMFLY-PT.txt`
-- `data/khovanov/sorted_khovanov.txt`
-- `data/knotname-reg/`
+1. Next to the executable, for example `build/data`
+2. One directory above the executable, for example `data` when running
+   `build/cpp_knot_indexer`
 
-Use `--data-root PATH` to point to another copy of this data layout. Legacy
-database layouts from the original project are intentionally not required.
+A valid data folder must contain:
+
+- `homfly/sorted_HOMFLY-PT.txt`
+- `khovanov/sorted_khovanov.txt`
+- `knotname-reg/`
+
+Use `--data-folder PATH` to point directly to another valid data folder. A
+user-specified data folder can have any name. When this option is present, the
+program does not run the automatic `data` lookup; an invalid path is reported as
+an error.
 
 ## Tests
 

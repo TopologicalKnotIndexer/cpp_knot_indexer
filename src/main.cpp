@@ -38,7 +38,7 @@ namespace {
 
 struct Options {
     std::string pdText;
-    std::filesystem::path dataRoot;
+    std::filesystem::path dataFolder;
     int timeoutSeconds = 60;
     bool verbose = false;
     bool printInvariants = false;
@@ -71,7 +71,7 @@ void usage(std::ostream& out) {
         << "  cpp_knot_indexer < code.txt\n\n"
         << "Options:\n"
         << "  --timeout SEC       Max seconds for HOMFLY-PT and Khovanov each (0 disables timeout; default 60).\n"
-        << "  --data-root PATH    Project root containing the data/ directory.\n"
+        << "  --data-folder PATH  Folder containing homfly/, khovanov/, and knotname-reg/.\n"
         << "  --print-invariants  Print computed invariant strings to stderr.\n"
         << "  --verbose           Print worker status, failures, and invariant strings to stderr.\n";
 }
@@ -109,37 +109,46 @@ bool existsPath(const std::filesystem::path& path) {
     return std::filesystem::exists(path, ec);
 }
 
-std::optional<DataPaths> tryResolveDataPaths(const std::filesystem::path& base) {
-    const std::filesystem::path hom =
-        "data/homfly/sorted_HOMFLY-PT.txt";
-    const std::filesystem::path kho =
-        "data/khovanov/sorted_khovanov.txt";
-    const std::filesystem::path norm =
-        "data/knotname-reg";
+bool isDirectory(const std::filesystem::path& path) {
+    std::error_code ec;
+    return std::filesystem::is_directory(path, ec);
+}
 
-    DataPaths paths{base / hom, base / kho, base / norm};
-    if (existsPath(paths.homflyDb) && existsPath(paths.khovanovDb) && existsPath(paths.normalizerDir)) return paths;
+std::optional<DataPaths> tryResolveDataFolder(const std::filesystem::path& folder) {
+    const std::filesystem::path homDir = folder / "homfly";
+    const std::filesystem::path khoDir = folder / "khovanov";
+    const std::filesystem::path normDir = folder / "knotname-reg";
+    if (!isDirectory(homDir) || !isDirectory(khoDir) || !isDirectory(normDir)) return std::nullopt;
+
+    DataPaths paths{homDir / "sorted_HOMFLY-PT.txt", khoDir / "sorted_khovanov.txt", normDir};
+    if (existsPath(paths.homflyDb) && existsPath(paths.khovanovDb)) return paths;
     return std::nullopt;
 }
 
-DataPaths findDataPaths(const std::filesystem::path& executable, const std::filesystem::path& userRoot) {
-    std::vector<std::filesystem::path> starts;
-    if (!userRoot.empty()) starts.push_back(userRoot);
-    starts.push_back(std::filesystem::current_path());
-    starts.push_back(executable.parent_path());
+std::string dataFolderRequirement() {
+    return "data folder must contain homfly/sorted_HOMFLY-PT.txt, "
+           "khovanov/sorted_khovanov.txt, and knotname-reg/";
+}
 
-    for (std::filesystem::path start : starts) {
+DataPaths findDataPaths(const std::filesystem::path& executable, const std::filesystem::path& userFolder) {
+    if (!userFolder.empty()) {
         std::error_code ec;
-        start = std::filesystem::absolute(start, ec);
-        if (ec) continue;
-        while (!start.empty()) {
-            if (auto paths = tryResolveDataPaths(start)) return *paths;
-            std::filesystem::path parent = start.parent_path();
-            if (parent == start) break;
-            start = parent;
-        }
+        std::filesystem::path folder = std::filesystem::absolute(userFolder, ec);
+        if (ec) folder = userFolder;
+        if (auto paths = tryResolveDataFolder(folder)) return *paths;
+        throw std::runtime_error("invalid --data-folder: " + folder.string() + "; " + dataFolderRequirement());
     }
-    throw std::runtime_error("cannot locate invariant databases; pass --data-root");
+
+    std::filesystem::path exeDir = executable.parent_path();
+    std::filesystem::path first = exeDir / "data";
+    if (auto paths = tryResolveDataFolder(first)) return *paths;
+
+    std::filesystem::path second = exeDir.parent_path() / "data";
+    if (auto paths = tryResolveDataFolder(second)) return *paths;
+
+    throw std::runtime_error("cannot locate default data folder at " + first.string() +
+                             " or " + second.string() + "; pass --data-folder. " +
+                             dataFolderRequirement());
 }
 
 Options parseOptions(int argc, char** argv) {
@@ -161,8 +170,8 @@ Options parseOptions(int argc, char** argv) {
         } else if (arg == "--timeout") {
             options.timeoutSeconds = std::stoi(needValue("--timeout"));
             if (options.timeoutSeconds < 0) throw std::runtime_error("--timeout must be >= 0");
-        } else if (arg == "--data-root") {
-            options.dataRoot = needValue("--data-root");
+        } else if (arg == "--data-folder") {
+            options.dataFolder = needValue("--data-folder");
         } else if (arg == "--print-invariants") {
             options.printInvariants = true;
         } else if (arg == "--verbose") {
@@ -284,6 +293,7 @@ int main(int argc, char** argv) {
         hki::PDCode pd = hki::parsePDCode(options.pdText);
         std::string canonicalPd = hki::formatPDCodeList(pd);
         std::filesystem::path executable = hki::currentExecutablePath(argv[0]);
+        hki::DataPaths dataPaths = hki::findDataPaths(executable, options.dataFolder);
 
         hki::WorkerResult khResult = hki::runWorkerProcess(executable, "khovanov", canonicalPd, options.timeoutSeconds);
         if (hki::interrupted() || khResult.interrupted) {
@@ -309,7 +319,6 @@ int main(int argc, char** argv) {
             return 2;
         }
 
-        hki::DataPaths dataPaths = hki::findDataPaths(executable, options.dataRoot);
         hki::NameNormalizer normalizer(dataPaths.normalizerDir);
         hki::InvariantMap khDb = hki::loadInvariantMap(dataPaths.khovanovDb, normalizer);
         hki::InvariantMap homDb = hki::loadInvariantMap(dataPaths.homflyDb, normalizer);

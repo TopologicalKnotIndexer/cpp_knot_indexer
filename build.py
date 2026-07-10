@@ -188,6 +188,23 @@ def source_args() -> list[str]:
     return args
 
 
+def copy_data_folder(output: Path) -> None:
+    source = ROOT / "data"
+    target = output.parent / "data"
+    if not source.is_dir():
+        raise SystemExit(f"ERROR: data folder not found: {source}")
+    try:
+        if source.resolve() == target.resolve():
+            print(f"INFO: data folder already beside executable: {target}")
+            return
+    except OSError:
+        pass
+    if target.exists():
+        shutil.rmtree(target)
+    shutil.copytree(source, target)
+    print(f"INFO: copied data folder to {target}")
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Build cpp_knot_indexer with g++/clang++.")
     parser.add_argument("--cxx", help="C++ compiler command, e.g. g++, clang++, or /path/to/g++.")
@@ -231,6 +248,7 @@ def main() -> int:
     if proc.returncode != 0:
         return proc.returncode
 
+    copy_data_folder(output)
     print(f"INFO: built {output}")
     return 0
 
