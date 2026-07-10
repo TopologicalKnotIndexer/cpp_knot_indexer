@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -182,6 +183,162 @@ def assert_timeout_degrades(exe: Path) -> None:
         raise AssertionError("negative timeout validation failed")
 
 
+def load_build_module():
+    spec = importlib.util.spec_from_file_location("cki_build", ROOT / "build.py")
+    if spec is None or spec.loader is None:
+        raise AssertionError("cannot load build.py helpers")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def auxiliary_compile_command(cxx: list[str], source: Path, output: Path, extra_link: list[str] | None = None) -> list[str]:
+    extra_link = extra_link or []
+    return cxx + [
+        "-std=c++17",
+        "-O2",
+        "-I", str(ROOT / "src" / "che_to_coord"),
+        "-I", str(ROOT / "src" / "link_pd_code"),
+        str(source),
+        str(ROOT / "src" / "che_to_coord" / "che_to_coord.cpp"),
+        str(ROOT / "src" / "link_pd_code" / "link_pd_code.cpp"),
+        "-o", str(output),
+    ] + extra_link
+
+
+def assert_auxiliary_modules(cxx_arg: str | None) -> None:
+    build_mod = load_build_module()
+    cxx = build_mod.find_compiler(cxx_arg)
+    with tempfile.TemporaryDirectory(prefix="cki_aux_") as tmp:
+        tmp_path = Path(tmp)
+        source = tmp_path / "auxiliary_test.cpp"
+        output = tmp_path / ("auxiliary_test" + EXE_SUFFIX)
+        source.write_text(r'''
+#include "che_to_coord.h"
+#include "link_pd_code.h"
+
+#include <iostream>
+#include <stdexcept>
+#include <vector>
+
+int main() {
+    const char* molecule = R"(
+LAMMPS data file
+
+4 atoms
+4 bonds
+
+Atoms
+
+1 0 0 0
+2 1 0 0
+3 1 1 0
+4 0 1 0
+
+Bonds
+
+1 1 1 2
+2 1 2 3
+3 1 3 4
+4 1 4 1
+)";
+    auto loop = cki::che_to_coord::parseCoordinateLoopText(molecule);
+    if (loop.size() != 4 || loop[0].atom_id != 1 || loop[1].atom_id != 2) {
+        std::cerr << "unexpected coordinate loop\n";
+        return 1;
+    }
+
+    const char* broken = R"(
+3 atoms
+2 bonds
+Atoms
+1 0 0 0
+2 1 0 0
+3 0 1 0
+Bonds
+1 1 1 2
+2 1 2 3
+)";
+    bool rejected = false;
+    try {
+        (void)cki::che_to_coord::parseCoordinateLoopText(broken);
+    } catch (const cki::che_to_coord::ParseError&) {
+        rejected = true;
+    }
+    if (!rejected) {
+        std::cerr << "broken molecule was accepted\n";
+        return 2;
+    }
+
+    std::vector<cki::link_pd_code::Point3> crossing = {
+        {-1.0, -1.0, 0.0},
+        { 1.0,  1.0, 0.0},
+        { 1.0, -1.0, 1.0},
+        {-1.0,  1.0, 1.0},
+    };
+    cki::link_pd_code::Options options;
+    options.direction = cki::link_pd_code::Point3{0.0, 0.0, 1.0};
+    options.prefer_min_crossings = false;
+    auto pd = cki::link_pd_code::computePDCode(crossing, options);
+    if (pd.size() != 1 || !cki::link_pd_code::validatePDCode(pd)) {
+        std::cerr << "unexpected PD code: " << cki::link_pd_code::formatPDCode(pd) << "\n";
+        return 3;
+    }
+
+    std::vector<cki::link_pd_code::Point3> square = {
+        {0.0, 0.0, 0.0},
+        {1.0, 0.0, 0.0},
+        {1.0, 1.0, 0.0},
+        {0.0, 1.0, 0.0},
+    };
+    auto empty = cki::link_pd_code::computePDCode(square, options);
+    if (!empty.empty()) {
+        std::cerr << "planar square should have no PD crossings\n";
+        return 4;
+    }
+
+    auto parsed_link = cki::link_pd_code::parseLinkCoordinateText(R"(
+1
+4
+0 0 0
+1 0 0
+1 1 0
+0 1 0
+)");
+    auto parsed_empty = cki::link_pd_code::computePDCode(parsed_link, options);
+    if (!parsed_empty.empty()) {
+        std::cerr << "parsed planar component should have empty PD code\n";
+        return 5;
+    }
+    options.encode_isolated_components = true;
+    auto degenerate = cki::link_pd_code::computePDCode(parsed_link, options);
+    if (cki::link_pd_code::formatPDCode(degenerate) != "[[1,1,2,2]]" ||
+        !cki::link_pd_code::validatePDCode(degenerate)) {
+        std::cerr << "isolated component encoding failed: "
+                  << cki::link_pd_code::formatPDCode(degenerate) << "\n";
+        return 6;
+    }
+
+    return 0;
+}
+''', encoding="utf-8")
+
+        cmd = auxiliary_compile_command(cxx, source, output)
+        proc = run(cmd, timeout=120)
+        if proc.returncode != 0 and os.name != "nt":
+            cmd = auxiliary_compile_command(cxx, source, output, ["-lstdc++fs"])
+            proc = run(cmd, timeout=120)
+        if proc.returncode != 0:
+            raise AssertionError(f"auxiliary module compile failed\nstdout={proc.stdout}\nstderr={proc.stderr}")
+
+        result = run([str(output)], timeout=30)
+        if result.returncode != 0:
+            raise AssertionError(
+                f"auxiliary module runtime failed with {result.returncode}\n"
+                f"stdout={result.stdout}\nstderr={result.stderr}"
+            )
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run pure C++ indexer smoke tests.")
     parser.add_argument("--exe", default=str(DEFAULT_EXE), help="Executable to test.")
@@ -210,6 +367,8 @@ def main() -> int:
     print("PASS missing-default-data")
     assert_timeout_degrades(exe)
     print("PASS timeout-cli-contract")
+    assert_auxiliary_modules(args.cxx)
+    print("PASS auxiliary-modules")
     return 0
 
 

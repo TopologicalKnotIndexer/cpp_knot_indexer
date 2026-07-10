@@ -19,13 +19,13 @@ EXE_SUFFIX = ".exe" if os.name == "nt" else ""
 TARGET_NAME = f"cpp_knot_indexer{EXE_SUFFIX}"
 
 CPP_SOURCES = [
-    "src/database.cpp",
-    "src/homfly_backend.cpp",
-    "src/khovanov_backend.cpp",
-    "src/main.cpp",
-    "src/pd_code.cpp",
-    "src/process_runner.cpp",
-    "src/runtime_control.cpp",
+    "src/knot_indexer/database.cpp",
+    "src/knot_indexer/homfly_backend.cpp",
+    "src/knot_indexer/khovanov_backend.cpp",
+    "src/knot_indexer/main.cpp",
+    "src/knot_indexer/pd_code.cpp",
+    "src/knot_indexer/process_runner.cpp",
+    "src/knot_indexer/runtime_control.cpp",
     "third_party/cppkh/cppkh_main.cpp",
 ]
 
@@ -146,7 +146,10 @@ def build_flags(args: argparse.Namespace, cxx: list[str]) -> tuple[list[str], li
         flags += ["-DKH_THREAD_BACKEND_STD"]
         link_flags = ["-pthread"]
 
-    flags += ["-I", str(ROOT / "src"), "-I", str(ROOT / "third_party/libhomfly")]
+    flags += [
+        "-I", str(ROOT / "src" / "knot_indexer"),
+        "-I", str(ROOT / "third_party/libhomfly"),
+    ]
 
     if not args.debug:
         for flag in ["-pipe"]:

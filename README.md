@@ -7,7 +7,9 @@ runtime.
 
 The project carries its own:
 
-- C++ source files under `src/`
+- knot indexer source files under `src/knot_indexer/`
+- molecule-to-coordinate code under `src/che_to_coord/`
+- 3D-coordinate-to-PD-code code under `src/link_pd_code/`
 - Python build and test scripts
 - vendored HOMFLY-PT and Khovanov computation code
 - invariant lookup data under `data/`
@@ -95,7 +97,9 @@ python test.py --rebuild
 ```
 
 The test script builds the executable if needed, then checks unknot, R1
-simplification, trefoil, stdin input, and CLI timeout validation.
+simplification, trefoil, stdin input, CLI timeout validation, and standalone
+compilation/runtime checks for the auxiliary `che_to_coord` and `link_pd_code`
+modules. The auxiliary modules are not linked into the main executable yet.
 
 ## Vendored Algorithms
 
@@ -105,6 +109,10 @@ simplification, trefoil, stdin input, and CLI timeout validation.
   It is compiled as C++ with a local `gc.h` compatibility shim, so Boehm GC is
   not required. The worker-process design makes per-computation allocations
   short-lived.
+- `src/link_pd_code`: MIT-licensed coordinate-to-PD-code module derived from
+  `GGN-2015/link-pd-code`, refactored as a standalone C++17 library with
+  deterministic projection retry, explicit genericity checks, and AABB/sweep
+  intersection pruning. It is not linked into the main executable yet.
 
 The HOMFLY-PT formatter mirrors the `L` exponent and orders terms to match the
 existing Sage/KnotInfo-style database strings.
