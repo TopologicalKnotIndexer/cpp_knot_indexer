@@ -97,5 +97,16 @@ Local fixes compared with the upstream project:
   projection failures
 - segment parameters are computed from the 2D line equations instead of using
   distance ratios
+- interval arithmetic filters determinant, range, and height calculations before
+  accepting floating-point decisions
+- exact scaled rational arithmetic is used as a fallback for near-degenerate
+  projected segment intersections, so endpoint and overlap classification does
+  not depend only on raw floating-point comparisons
 - isolated no-crossing components return no PD crossing by default, with an
   option to reproduce upstream-style degenerate isolated component encoding
+
+The exact rational fallback is intentionally not used for every segment pair.
+The common path still uses the existing AABB/sweep pruning and double arithmetic
+for clearly separated cases. Exact arithmetic is invoked only when the interval
+filter marks the determinant or unit-interval boundary classification as
+uncertain.

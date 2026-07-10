@@ -319,6 +319,44 @@ Bonds
         return 6;
     }
 
+    cki::link_pd_code::Options robust_options;
+    robust_options.direction = cki::link_pd_code::Point3{0.0, 0.0, 1.0};
+    robust_options.prefer_min_crossings = false;
+
+    std::vector<cki::link_pd_code::Point3> endpoint_touch = {
+        {0.0,  0.0, 0.0},
+        {1.0,  0.0, 0.0},
+        {1.0, -1.0, 1.0},
+        {1.0,  1.0, 1.0},
+    };
+    bool endpoint_rejected = false;
+    try {
+        (void)cki::link_pd_code::computePDCode(endpoint_touch, robust_options);
+    } catch (const cki::link_pd_code::ProjectionError&) {
+        endpoint_rejected = true;
+    }
+    if (!endpoint_rejected) {
+        std::cerr << "endpoint projection crossing was accepted\n";
+        return 7;
+    }
+
+    std::vector<cki::link_pd_code::Point3> overlap = {
+        {0.0, 0.0, 0.0},
+        {2.0, 0.0, 0.0},
+        {1.0, 0.0, 1.0},
+        {3.0, 0.0, 1.0},
+    };
+    bool overlap_rejected = false;
+    try {
+        (void)cki::link_pd_code::computePDCode(overlap, robust_options);
+    } catch (const cki::link_pd_code::ProjectionError&) {
+        overlap_rejected = true;
+    }
+    if (!overlap_rejected) {
+        std::cerr << "overlapping projected segments were accepted\n";
+        return 8;
+    }
+
     return 0;
 }
 ''', encoding="utf-8")

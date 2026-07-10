@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <limits>
@@ -31,6 +32,53 @@ struct ProjectedPoint {
     double height = 0.0;
 };
 
+struct Interval {
+    double lo = 0.0;
+    double hi = 0.0;
+
+    static Interval point(double value) {
+        return Interval{
+            std::nextafter(value, -std::numeric_limits<double>::infinity()),
+            std::nextafter(value, std::numeric_limits<double>::infinity()),
+        };
+    }
+
+    static Interval hull(double a, double b) {
+        return Interval{
+            std::nextafter(std::min(a, b), -std::numeric_limits<double>::infinity()),
+            std::nextafter(std::max(a, b), std::numeric_limits<double>::infinity()),
+        };
+    }
+
+    bool containsZero() const {
+        return lo <= 0.0 && 0.0 <= hi;
+    }
+};
+
+struct IntervalPoint2 {
+    Interval x;
+    Interval y;
+};
+
+using ExactInt = __int128_t;
+
+struct ExactPoint2 {
+    ExactInt x = 0;
+    ExactInt y = 0;
+};
+
+struct ExactSegmentPair {
+    ExactPoint2 a;
+    ExactPoint2 b;
+    ExactPoint2 c;
+    ExactPoint2 d;
+};
+
+struct ExactParameter {
+    ExactInt num = 0;
+    ExactInt den = 1;
+};
+
 struct Segment {
     int component = 0;
     int segment = 0;
@@ -44,6 +92,8 @@ struct Segment {
     double max_x = 0.0;
     double min_y = 0.0;
     double max_y = 0.0;
+    Interval x_range;
+    Interval y_range;
 };
 
 struct StrandAtCrossing {
@@ -59,6 +109,11 @@ struct StrandAtCrossing {
 struct ProjectionCrossing {
     StrandAtCrossing strands[2];
     Point2 xy;
+};
+
+struct IntersectionAttempt {
+    bool available = false;
+    std::optional<ProjectionCrossing> crossing;
 };
 
 struct Occurrence {
@@ -117,6 +172,52 @@ double cross2(const Point2& a, const Point2& b) {
     return a.x * b.y - a.y * b.x;
 }
 
+Interval addInterval(const Interval& a, const Interval& b) {
+    return Interval{
+        std::nextafter(a.lo + b.lo, -std::numeric_limits<double>::infinity()),
+        std::nextafter(a.hi + b.hi, std::numeric_limits<double>::infinity()),
+    };
+}
+
+Interval subInterval(const Interval& a, const Interval& b) {
+    return Interval{
+        std::nextafter(a.lo - b.hi, -std::numeric_limits<double>::infinity()),
+        std::nextafter(a.hi - b.lo, std::numeric_limits<double>::infinity()),
+    };
+}
+
+Interval mulInterval(const Interval& a, const Interval& b) {
+    const double values[4] = {
+        a.lo * b.lo,
+        a.lo * b.hi,
+        a.hi * b.lo,
+        a.hi * b.hi,
+    };
+    const auto minmax = std::minmax_element(std::begin(values), std::end(values));
+    return Interval{
+        std::nextafter(*minmax.first, -std::numeric_limits<double>::infinity()),
+        std::nextafter(*minmax.second, std::numeric_limits<double>::infinity()),
+    };
+}
+
+IntervalPoint2 intervalPoint(const Point2& point) {
+    return IntervalPoint2{Interval::point(point.x), Interval::point(point.y)};
+}
+
+IntervalPoint2 subIntervalPoint(const IntervalPoint2& a, const IntervalPoint2& b) {
+    return IntervalPoint2{subInterval(a.x, b.x), subInterval(a.y, b.y)};
+}
+
+Interval crossInterval(const IntervalPoint2& a, const IntervalPoint2& b) {
+    return subInterval(mulInterval(a.x, b.y), mulInterval(a.y, b.x));
+}
+
+Interval lerpInterval(double a, double b, double t) {
+    const Interval start = Interval::point(a);
+    const Interval delta = subInterval(Interval::point(b), start);
+    return addInterval(start, mulInterval(Interval::point(t), delta));
+}
+
 double norm(const Point3& value) {
     return std::sqrt(dot(value, value));
 }
@@ -128,6 +229,97 @@ double squaredDistance(const Point3& a, const Point3& b) {
 
 bool finitePoint(const Point3& point) {
     return std::isfinite(point.x) && std::isfinite(point.y) && std::isfinite(point.z);
+}
+
+ExactInt crossExact(const ExactPoint2& a, const ExactPoint2& b) {
+    return a.x * b.y - a.y * b.x;
+}
+
+ExactPoint2 subExact(const ExactPoint2& a, const ExactPoint2& b) {
+    return ExactPoint2{a.x - b.x, a.y - b.y};
+}
+
+bool exactRangeOverlap(ExactInt a0, ExactInt a1, ExactInt b0, ExactInt b1) {
+    if (a0 > a1) {
+        std::swap(a0, a1);
+    }
+    if (b0 > b1) {
+        std::swap(b0, b1);
+    }
+    return std::max(a0, b0) <= std::min(a1, b1);
+}
+
+bool exactCollinearRangesOverlap(const ExactSegmentPair& pair) {
+    return exactRangeOverlap(pair.a.x, pair.b.x, pair.c.x, pair.d.x) &&
+           exactRangeOverlap(pair.a.y, pair.b.y, pair.c.y, pair.d.y);
+}
+
+bool exactClosedUnitInterval(const ExactParameter& value) {
+    return value.num >= 0 && value.num <= value.den;
+}
+
+bool exactStrictUnitInterval(const ExactParameter& value) {
+    return value.num > 0 && value.num < value.den;
+}
+
+double exactParameterToDouble(const ExactParameter& value) {
+    return static_cast<double>(static_cast<long double>(value.num) /
+                               static_cast<long double>(value.den));
+}
+
+std::optional<ExactSegmentPair> makeExactSegmentPair(const Segment& a, const Segment& b) {
+    constexpr std::int64_t kMaxExactScale = 1000000000000000LL;
+    constexpr long double kMaxScaledCoordinate = 1.0e18L;
+    const double coords[] = {a.a.x, a.a.y, a.b.x, a.b.y, b.a.x, b.a.y, b.b.x, b.b.y};
+
+    long double max_abs = 0.0L;
+    for (double coord : coords) {
+        if (!std::isfinite(coord)) {
+            return std::nullopt;
+        }
+        max_abs = std::max(max_abs, std::fabs(static_cast<long double>(coord)));
+    }
+
+    long double allowed_scale = static_cast<long double>(kMaxExactScale);
+    if (max_abs > 0.0L) {
+        allowed_scale = std::min(allowed_scale, kMaxScaledCoordinate / max_abs);
+    }
+    if (allowed_scale < 1.0L) {
+        return std::nullopt;
+    }
+
+    std::int64_t scale = 1;
+    while (scale <= kMaxExactScale / 10 &&
+           static_cast<long double>(scale) * 10.0L <= allowed_scale) {
+        scale *= 10;
+    }
+
+    auto convert = [&](double value) -> std::optional<ExactInt> {
+        const long double scaled = static_cast<long double>(value) * static_cast<long double>(scale);
+        if (!std::isfinite(scaled) || std::fabs(scaled) > kMaxScaledCoordinate) {
+            return std::nullopt;
+        }
+        return static_cast<ExactInt>(std::llround(scaled));
+    };
+
+    const auto ax = convert(a.a.x);
+    const auto ay = convert(a.a.y);
+    const auto bx = convert(a.b.x);
+    const auto by = convert(a.b.y);
+    const auto cx = convert(b.a.x);
+    const auto cy = convert(b.a.y);
+    const auto dx = convert(b.b.x);
+    const auto dy = convert(b.b.y);
+    if (!ax || !ay || !bx || !by || !cx || !cy || !dx || !dy) {
+        return std::nullopt;
+    }
+
+    return ExactSegmentPair{
+        ExactPoint2{*ax, *ay},
+        ExactPoint2{*bx, *by},
+        ExactPoint2{*cx, *cy},
+        ExactPoint2{*dx, *dy},
+    };
 }
 
 Point3 normalize(const Point3& value, double epsilon, const char* field_name) {
@@ -244,6 +436,8 @@ std::vector<Segment> buildSegments(const std::vector<std::vector<ProjectedPoint>
             segment.max_x = std::max(segment.a.x, segment.b.x);
             segment.min_y = std::min(segment.a.y, segment.b.y);
             segment.max_y = std::max(segment.a.y, segment.b.y);
+            segment.x_range = Interval::hull(segment.a.x, segment.b.x);
+            segment.y_range = Interval::hull(segment.a.y, segment.b.y);
             segments.push_back(segment);
         }
     }
@@ -262,7 +456,8 @@ bool sameOrAdjacent(const Segment& a, const Segment& b,
 }
 
 bool yRangesOverlap(const Segment& a, const Segment& b, double epsilon) {
-    return std::max(a.min_y, b.min_y) <= std::min(a.max_y, b.max_y) + epsilon;
+    return a.y_range.lo <= b.y_range.hi + epsilon &&
+           b.y_range.lo <= a.y_range.hi + epsilon;
 }
 
 bool rangesOverlap(double a0, double a1, double b0, double b1, double epsilon) {
@@ -290,34 +485,17 @@ bool strictUnitInterval(double value, double epsilon) {
     return value > epsilon && value < 1.0 - epsilon;
 }
 
-std::optional<ProjectionCrossing> intersectSegments(const Segment& a,
-                                                    const Segment& b,
-                                                    double epsilon) {
-    const Point2 r = a.b - a.a;
-    const Point2 s = b.b - b.a;
-    const Point2 delta = b.a - a.a;
-    const double denominator = cross2(r, s);
-
-    if (std::fabs(denominator) <= epsilon) {
-        if (std::fabs(cross2(delta, r)) <= epsilon &&
-            collinearRangesOverlap(a.a, a.b, b.a, b.b, epsilon)) {
-            throw ProjectionFailure("non-generic projection: overlapping projected segments");
-        }
-        return std::nullopt;
-    }
-
-    const double t = cross2(delta, s) / denominator;
-    const double u = cross2(delta, r) / denominator;
-    if (!closedUnitInterval(t, epsilon) || !closedUnitInterval(u, epsilon)) {
-        return std::nullopt;
-    }
-    if (!strictUnitInterval(t, epsilon) || !strictUnitInterval(u, epsilon)) {
-        throw ProjectionFailure("non-generic projection: crossing at a segment endpoint");
-    }
-
+ProjectionCrossing crossingFromParameters(const Segment& a,
+                                          const Segment& b,
+                                          double t,
+                                          double u,
+                                          double epsilon) {
     const double height_a = a.z0 + t * (a.z1 - a.z0);
     const double height_b = b.z0 + u * (b.z1 - b.z0);
-    if (std::fabs(height_a - height_b) <= epsilon) {
+    const Interval height_delta = subInterval(lerpInterval(a.z0, a.z1, t),
+                                              lerpInterval(b.z0, b.z1, u));
+    if ((height_delta.containsZero() && std::fabs(height_a - height_b) <= epsilon) ||
+        std::fabs(height_a - height_b) <= epsilon) {
         throw ProjectionFailure("non-generic projection: over/under heights are tied");
     }
 
@@ -328,7 +506,105 @@ std::optional<ProjectionCrossing> intersectSegments(const Segment& a,
     crossing.strands[1] = StrandAtCrossing{
         b.component, b.segment, u, height_b, height_b < height_a, 0, 0,
     };
-    crossing.xy = a.a + r * t;
+    crossing.xy = a.a + (a.b - a.a) * t;
+    return crossing;
+}
+
+IntersectionAttempt intersectSegmentsExact(const Segment& a,
+                                           const Segment& b,
+                                           double epsilon) {
+    const std::optional<ExactSegmentPair> exact = makeExactSegmentPair(a, b);
+    if (!exact.has_value()) {
+        return IntersectionAttempt{false, std::nullopt};
+    }
+
+    const ExactPoint2 r = subExact(exact->b, exact->a);
+    const ExactPoint2 s = subExact(exact->d, exact->c);
+    const ExactPoint2 delta = subExact(exact->c, exact->a);
+    ExactInt denominator = crossExact(r, s);
+
+    if (denominator == 0) {
+        if (crossExact(delta, r) == 0 && exactCollinearRangesOverlap(*exact)) {
+            throw ProjectionFailure("non-generic projection: overlapping projected segments");
+        }
+        return IntersectionAttempt{true, std::nullopt};
+    }
+
+    ExactParameter t{crossExact(delta, s), denominator};
+    ExactParameter u{crossExact(delta, r), denominator};
+    if (denominator < 0) {
+        t.num = -t.num;
+        t.den = -t.den;
+        u.num = -u.num;
+        u.den = -u.den;
+    }
+
+    if (!exactClosedUnitInterval(t) || !exactClosedUnitInterval(u)) {
+        return IntersectionAttempt{true, std::nullopt};
+    }
+    if (!exactStrictUnitInterval(t) || !exactStrictUnitInterval(u)) {
+        throw ProjectionFailure("non-generic projection: crossing at a segment endpoint");
+    }
+
+    const double td = exactParameterToDouble(t);
+    const double ud = exactParameterToDouble(u);
+    return IntersectionAttempt{true, crossingFromParameters(a, b, td, ud, epsilon)};
+}
+
+bool nearUnitBoundary(double value, double epsilon) {
+    return std::fabs(value) <= epsilon || std::fabs(value - 1.0) <= epsilon;
+}
+
+std::optional<ProjectionCrossing> intersectSegments(const Segment& a,
+                                                    const Segment& b,
+                                                    double epsilon) {
+    const Point2 r = a.b - a.a;
+    const Point2 s = b.b - b.a;
+    const Point2 delta = b.a - a.a;
+
+    const IntervalPoint2 ia = intervalPoint(a.a);
+    const IntervalPoint2 ib = intervalPoint(a.b);
+    const IntervalPoint2 ic = intervalPoint(b.a);
+    const IntervalPoint2 id = intervalPoint(b.b);
+    const IntervalPoint2 ir = subIntervalPoint(ib, ia);
+    const IntervalPoint2 is = subIntervalPoint(id, ic);
+    const Interval denominator_interval = crossInterval(ir, is);
+    const double denominator = cross2(r, s);
+
+    if (denominator_interval.containsZero() || std::fabs(denominator) <= epsilon) {
+        const IntersectionAttempt exact = intersectSegmentsExact(a, b, epsilon);
+        if (exact.available) {
+            return exact.crossing;
+        }
+    }
+
+    if (std::fabs(denominator) <= epsilon) {
+        const IntervalPoint2 idelta = subIntervalPoint(ic, ia);
+        const Interval collinear_interval = crossInterval(idelta, ir);
+        if ((collinear_interval.containsZero() || std::fabs(cross2(delta, r)) <= epsilon) &&
+            collinearRangesOverlap(a.a, a.b, b.a, b.b, epsilon)) {
+            throw ProjectionFailure("non-generic projection: overlapping projected segments");
+        }
+        return std::nullopt;
+    }
+
+    const double t = cross2(delta, s) / denominator;
+    const double u = cross2(delta, r) / denominator;
+    if (nearUnitBoundary(t, epsilon) || nearUnitBoundary(u, epsilon)) {
+        const IntersectionAttempt exact = intersectSegmentsExact(a, b, epsilon);
+        if (exact.available) {
+            return exact.crossing;
+        }
+    }
+
+    if (!closedUnitInterval(t, epsilon) || !closedUnitInterval(u, epsilon)) {
+        return std::nullopt;
+    }
+    if (!strictUnitInterval(t, epsilon) || !strictUnitInterval(u, epsilon)) {
+        throw ProjectionFailure("non-generic projection: crossing at a segment endpoint");
+    }
+
+    ProjectionCrossing crossing = crossingFromParameters(a, b, t, u, epsilon);
     return crossing;
 }
 
