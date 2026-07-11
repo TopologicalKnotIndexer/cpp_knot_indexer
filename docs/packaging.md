@@ -130,6 +130,10 @@ On other platforms, the build defines:
 
 The script also probes whether `std::filesystem` needs `-lstdc++fs`.
 
+The main executable also includes
+`third_party/cpp-pd-code-simplify/include` so the simplification backend can be
+used without building a separate library.
+
 ## Data Folder Packaging
 
 After a successful `knot_indexer` build, `build.py` copies the repository

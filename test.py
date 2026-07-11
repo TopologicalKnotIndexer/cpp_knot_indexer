@@ -125,6 +125,8 @@ def assert_case(exe: Path, case: dict[str, object]) -> None:
     for needle in case.get("must_contain", []):
         if str(needle) not in combined:
             raise AssertionError(f"{case['name']} missing {needle!r}\ncombined output:\n{combined}")
+    if not case.get("stdin") and "Simplify" not in proc.stderr:
+        raise AssertionError(f"{case['name']} did not report simplify diagnostics in verbose mode\nstderr={proc.stderr}")
 
 
 def assert_custom_data_folder(exe: Path) -> None:
@@ -275,6 +277,28 @@ def assert_timeout_degrades(exe: Path) -> None:
     bad = run([str(exe), "--pd-code", str(CASES[2]["pd"]), "--timeout", "-1"], timeout=30)
     if bad.returncode == 0 or "--timeout must be >= 0" not in bad.stderr:
         raise AssertionError("negative timeout validation failed")
+
+
+def assert_simplify_worker(exe: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="cki_simplify_") as tmp:
+        tmp_path = Path(tmp)
+        input_path = tmp_path / "input.txt"
+        output_path = tmp_path / "output.txt"
+        input_path.write_text("[[1,2,2,1]]", encoding="utf-8")
+        proc = run([
+            str(exe),
+            "--worker",
+            "simplify",
+            "--input",
+            str(input_path),
+            "--output",
+            str(output_path),
+        ], timeout=30)
+        if proc.returncode != 0:
+            raise AssertionError(f"simplify worker failed\nstdout={proc.stdout}\nstderr={proc.stderr}")
+        simplified = output_path.read_text(encoding="utf-8").strip()
+        if simplified != "[]":
+            raise AssertionError(f"simplify worker expected [], got {simplified!r}")
 
 
 def load_build_module():
@@ -595,6 +619,8 @@ def main() -> int:
     print("PASS missing-default-data")
     assert_timeout_degrades(exe)
     print("PASS timeout-cli-contract")
+    assert_simplify_worker(exe)
+    print("PASS simplify-worker")
     assert_auxiliary_modules(args.cxx)
     print("PASS auxiliary-modules")
     assert_default_builds_all_tools(args.cxx, args.portable)

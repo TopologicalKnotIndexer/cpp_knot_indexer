@@ -1,6 +1,7 @@
 #include "database.hpp"
 #include "homfly_backend.hpp"
 #include "khovanov_backend.hpp"
+#include "pd_simplify_backend.hpp"
 #include "pd_code.hpp"
 #include "process_runner.hpp"
 #include "runtime_control.hpp"
@@ -8,14 +9,17 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #ifdef _WIN32
@@ -265,10 +269,222 @@ std::vector<std::string> mergeCandidates(const WorkerResult& khResult,
     return sortedUnique(combined);
 }
 
+enum class InvariantKind {
+    Homfly,
+    Khovanov,
+};
+
+struct AttemptRecord {
+    InvariantKind kind = InvariantKind::Homfly;
+    std::string source;
+    WorkerResult result;
+};
+
+struct SelectedInvariant {
+    WorkerResult result;
+    std::string source;
+    std::vector<AttemptRecord> attempts;
+};
+
+struct RunningAttempt {
+    InvariantKind kind = InvariantKind::Homfly;
+    std::string source;
+    std::unique_ptr<WorkerProcess> process;
+};
+
+struct InvariantPipelineResult {
+    SelectedInvariant homfly;
+    SelectedInvariant khovanov;
+    WorkerResult simplify;
+    std::string originalPd;
+    std::string simplifiedPd;
+    bool simplifiedUsable = false;
+};
+
+std::string workerNameFor(InvariantKind kind) {
+    return kind == InvariantKind::Homfly ? "homfly" : "khovanov";
+}
+
+const char* displayNameFor(InvariantKind kind) {
+    return kind == InvariantKind::Homfly ? "HOMFLY-PT" : "Khovanov";
+}
+
+SelectedInvariant& selectedFor(InvariantPipelineResult& result, InvariantKind kind) {
+    return kind == InvariantKind::Homfly ? result.homfly : result.khovanov;
+}
+
+const SelectedInvariant& selectedFor(const InvariantPipelineResult& result, InvariantKind kind) {
+    return kind == InvariantKind::Homfly ? result.homfly : result.khovanov;
+}
+
+bool hasRunningSource(const std::vector<RunningAttempt>& running,
+                      InvariantKind kind,
+                      const std::string& source) {
+    return std::any_of(running.begin(), running.end(), [kind, &source](const RunningAttempt& attempt) {
+        return attempt.kind == kind && attempt.source == source;
+    });
+}
+
+bool hasAttemptSource(const SelectedInvariant& selected, const std::string& source) {
+    return std::any_of(selected.attempts.begin(), selected.attempts.end(),
+                       [&source](const AttemptRecord& attempt) {
+                           return attempt.source == source;
+                       });
+}
+
+void recordAttempt(SelectedInvariant& selected,
+                   InvariantKind kind,
+                   const std::string& source,
+                   const WorkerResult& result) {
+    selected.attempts.push_back(AttemptRecord{kind, source, result});
+    if (result.success && !selected.result.success) {
+        selected.result = result;
+        selected.source = source;
+    } else if (!selected.result.success && !result.cancelled) {
+        selected.result = result;
+        selected.source = source;
+    }
+}
+
+void cancelRunningKind(std::vector<RunningAttempt>& running, InvariantKind kind) {
+    for (RunningAttempt& attempt : running) {
+        if (attempt.kind == kind) {
+            cancelWorkerProcess(*attempt.process);
+        }
+    }
+}
+
+void eraseFinishedCancelled(std::vector<RunningAttempt>& running) {
+    running.erase(
+        std::remove_if(running.begin(), running.end(), [](const RunningAttempt& attempt) {
+            return attempt.process->result().cancelled;
+        }),
+        running.end());
+}
+
+InvariantPipelineResult computeInvariantPipeline(const std::filesystem::path& executable,
+                                                 const std::string& canonicalPd,
+                                                 int timeoutSeconds) {
+    InvariantPipelineResult result;
+    result.originalPd = canonicalPd;
+
+    const auto deadline = timeoutSeconds > 0
+        ? std::chrono::steady_clock::now() + std::chrono::seconds(timeoutSeconds)
+        : std::chrono::steady_clock::time_point::max();
+
+    std::vector<RunningAttempt> running;
+    auto startInvariant = [&](InvariantKind kind, const std::string& source, const std::string& pdText) {
+        SelectedInvariant& selected = selectedFor(result, kind);
+        if (selected.result.success || hasAttemptSource(selected, source) ||
+            hasRunningSource(running, kind, source)) {
+            return;
+        }
+        running.push_back(RunningAttempt{
+            kind,
+            source,
+            startWorkerProcess(executable, workerNameFor(kind), pdText),
+        });
+    };
+
+    startInvariant(InvariantKind::Homfly, "original", canonicalPd);
+    startInvariant(InvariantKind::Khovanov, "original", canonicalPd);
+    std::unique_ptr<WorkerProcess> simplify =
+        startWorkerProcess(executable, "simplify", canonicalPd);
+    bool simplifyFinished = false;
+    bool simplifiedAttemptsStarted = false;
+
+    auto maybeStartSimplifiedAttempts = [&]() {
+        if (simplifiedAttemptsStarted || !result.simplifiedUsable) return;
+        simplifiedAttemptsStarted = true;
+        if (!selectedFor(result, InvariantKind::Homfly).result.success) {
+            startInvariant(InvariantKind::Homfly, "simplified", result.simplifiedPd);
+        }
+        if (!selectedFor(result, InvariantKind::Khovanov).result.success) {
+            startInvariant(InvariantKind::Khovanov, "simplified", result.simplifiedPd);
+        }
+    };
+
+    while (true) {
+        if (interrupted()) {
+            if (simplify && !simplifyFinished) cancelWorkerProcess(*simplify);
+            for (RunningAttempt& attempt : running) cancelWorkerProcess(*attempt.process);
+            result.homfly.result.interrupted = true;
+            result.khovanov.result.interrupted = true;
+            break;
+        }
+
+        if (simplify && !simplifyFinished && pollWorkerProcess(*simplify, deadline)) {
+            result.simplify = finishWorkerProcess(*simplify);
+            simplifyFinished = true;
+            if (result.simplify.success) {
+                result.simplifiedPd = result.simplify.output;
+                result.simplifiedUsable = !result.simplifiedPd.empty() && result.simplifiedPd != canonicalPd;
+                maybeStartSimplifiedAttempts();
+            }
+        }
+
+        for (std::size_t i = 0; i < running.size();) {
+            RunningAttempt& attempt = running[i];
+            if (!pollWorkerProcess(*attempt.process, deadline)) {
+                ++i;
+                continue;
+            }
+
+            WorkerResult workerResult = finishWorkerProcess(*attempt.process);
+            SelectedInvariant& selected = selectedFor(result, attempt.kind);
+            const bool wasAlreadySelected = selected.result.success;
+            recordAttempt(selected, attempt.kind, attempt.source, workerResult);
+            const bool selectedNow = workerResult.success && !wasAlreadySelected;
+            if (selectedNow) {
+                cancelRunningKind(running, attempt.kind);
+            }
+            running.erase(running.begin() + static_cast<std::ptrdiff_t>(i));
+            eraseFinishedCancelled(running);
+        }
+
+        if (result.homfly.result.success && result.khovanov.result.success &&
+            simplify && !simplifyFinished) {
+            cancelWorkerProcess(*simplify);
+            result.simplify = finishWorkerProcess(*simplify);
+            simplifyFinished = true;
+        }
+
+        if (simplifyFinished) {
+            maybeStartSimplifiedAttempts();
+        }
+
+        const bool noMoreSimplifyWork = simplifyFinished || !simplify;
+        if (running.empty() && noMoreSimplifyWork) {
+            break;
+        }
+
+        if (std::chrono::steady_clock::now() >= deadline) {
+            if (simplify && !simplifyFinished) {
+                pollWorkerProcess(*simplify, deadline);
+                result.simplify = finishWorkerProcess(*simplify);
+                simplifyFinished = true;
+            }
+            for (RunningAttempt& attempt : running) {
+                pollWorkerProcess(*attempt.process, deadline);
+                WorkerResult workerResult = finishWorkerProcess(*attempt.process);
+                recordAttempt(selectedFor(result, attempt.kind), attempt.kind, attempt.source, workerResult);
+            }
+            running.clear();
+            break;
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    return result;
+}
+
 void printWorkerStatus(const char* name, const WorkerResult& result) {
     std::cerr << name << ": ";
     if (result.success) {
         std::cerr << "ok";
+    } else if (result.cancelled) {
+        std::cerr << "cancelled";
     } else if (result.timedOut) {
         std::cerr << "timeout";
     } else if (result.interrupted) {
@@ -285,7 +501,9 @@ void printWorkerDetails(const char* name, const WorkerResult& result, bool print
         if (printValue) std::cerr << name << " result: " << result.output << "\n";
         return;
     }
-    if (result.timedOut) {
+    if (result.cancelled) {
+        std::cerr << name << " detail: cancelled after a competing worker finished\n";
+    } else if (result.timedOut) {
         std::cerr << name << " detail: timed out after " << result.seconds << "s\n";
     } else if (result.interrupted) {
         std::cerr << name << " detail: interrupted\n";
@@ -294,6 +512,36 @@ void printWorkerDetails(const char* name, const WorkerResult& result, bool print
     }
     if (!result.error.empty()) {
         std::cerr << name << " stderr:\n" << result.error << "\n";
+    }
+}
+
+void printPipelineDetails(const InvariantPipelineResult& pipeline, bool printValue) {
+    for (InvariantKind kind : {InvariantKind::Khovanov, InvariantKind::Homfly}) {
+        const SelectedInvariant& selected = selectedFor(pipeline, kind);
+        for (const AttemptRecord& attempt : selected.attempts) {
+            const std::string name = std::string(displayNameFor(kind)) + " (" + attempt.source + ")";
+            printWorkerDetails(name.c_str(), attempt.result, false);
+        }
+    }
+
+    printWorkerDetails("Simplify", pipeline.simplify, false);
+    if (pipeline.simplify.success) {
+        std::cerr << "Simplify result: " << pipeline.simplify.output << "\n";
+    }
+
+    const SelectedInvariant& khovanov = pipeline.khovanov;
+    const SelectedInvariant& homfly = pipeline.homfly;
+    if (khovanov.result.success) {
+        std::cerr << "Khovanov selected source: " << khovanov.source << "\n";
+        if (printValue) std::cerr << "Khovanov result: " << khovanov.result.output << "\n";
+    } else {
+        printWorkerDetails("Khovanov", khovanov.result, false);
+    }
+    if (homfly.result.success) {
+        std::cerr << "HOMFLY-PT selected source: " << homfly.source << "\n";
+        if (printValue) std::cerr << "HOMFLY-PT result: " << homfly.result.output << "\n";
+    } else {
+        printWorkerDetails("HOMFLY-PT", homfly.result, false);
     }
 }
 
@@ -321,6 +569,7 @@ int workerMain(int argc, char** argv) {
     std::string value;
     if (worker == "khovanov") value = computeKhovanov(pd);
     else if (worker == "homfly") value = computeHomflyPT(pd);
+    else if (worker == "simplify") value = computeSimplifiedPDCode(pd);
     else throw std::runtime_error("unknown worker: " + worker);
     writeWholeFile(outputPath, value);
     return 0;
@@ -333,7 +582,10 @@ int workerMain(int argc, char** argv) {
 int main(int argc, char** argv) {
     try {
         for (int i = 1; i < argc; ++i) {
-            if (std::string(argv[i]) == "--worker") return hki::workerMain(argc, argv);
+            if (std::string(argv[i]) == "--worker") {
+                hki::installInterruptHandlers();
+                return hki::workerMain(argc, argv);
+            }
         }
 
         hki::installInterruptHandlers();
@@ -343,20 +595,18 @@ int main(int argc, char** argv) {
         std::filesystem::path executable = hki::currentExecutablePath(argv[0]);
         hki::DataPaths dataPaths = hki::findDataPaths(executable, options.dataFolder, options.sqliteDb);
 
-        hki::WorkerResult khResult = hki::runWorkerProcess(executable, "khovanov", canonicalPd, options.timeoutSeconds);
-        if (hki::interrupted() || khResult.interrupted) {
-            std::cerr << "Interrupted; exiting cleanly.\n";
-            return 130;
-        }
-        hki::WorkerResult homResult = hki::runWorkerProcess(executable, "homfly", canonicalPd, options.timeoutSeconds);
-        if (hki::interrupted() || homResult.interrupted) {
+        hki::InvariantPipelineResult pipeline =
+            hki::computeInvariantPipeline(executable, canonicalPd, options.timeoutSeconds);
+        hki::WorkerResult khResult = pipeline.khovanov.result;
+        hki::WorkerResult homResult = pipeline.homfly.result;
+
+        if (hki::interrupted() || khResult.interrupted || homResult.interrupted) {
             std::cerr << "Interrupted; exiting cleanly.\n";
             return 130;
         }
 
         if (options.verbose) {
-            hki::printWorkerDetails("Khovanov", khResult, true);
-            hki::printWorkerDetails("HOMFLY-PT", homResult, true);
+            hki::printPipelineDetails(pipeline, true);
         } else if (options.printInvariants) {
             std::cerr << "Khovanov result: " << (khResult.success ? khResult.output : "<failed>") << "\n";
             std::cerr << "HOMFLY-PT result: " << (homResult.success ? homResult.output : "<failed>") << "\n";

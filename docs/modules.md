@@ -43,6 +43,11 @@ Vendored MIT-licensed Khovanov implementation from `GGN-2015/cppkh`.
 Vendored public-domain HOMFLY implementation. It is compiled as C++ together
 with the main executable sources.
 
+`third_party/cpp-pd-code-simplify`
+
+Vendored MIT-licensed header-only PD-code simplifier from
+`GGN-2015/cpp-pd-code-simplify`.
+
 `third_party/sqlite`
 
 Vendored public-domain SQLite amalgamation used by the main executable when a
@@ -84,10 +89,16 @@ the resulting polynomial for database lookup.
 Connects parsed PD data to the vendored `cppkh` computation path and formats
 the resulting integral Khovanov invariant.
 
+`pd_simplify_backend.hpp`
+
+Connects parsed PD data to the vendored `cpp-pd-code-simplify` reducer and
+formats the simplified PD code back into the project's canonical `[[...]]`
+representation.
+
 `process_runner.hpp`
 
-Spawns worker processes, enforces per-worker timeout limits, captures stdout
-and stderr, and reports worker status to the main process.
+Spawns worker processes, supports polling and cancellation, enforces pipeline
+deadlines, captures stderr, and reports worker status to the main process.
 
 `runtime_control.hpp`
 

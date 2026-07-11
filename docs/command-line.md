@@ -35,10 +35,11 @@ Read the PD code from a file.
 
 `--timeout SEC`
 
-Set the maximum number of seconds for each invariant worker. The timeout is
-applied independently to the HOMFLY-PT worker and the Khovanov worker. The
-default is `60`. Use `0` to disable worker timeouts. Negative values are
-rejected.
+Set the maximum number of seconds for one lookup pipeline. The timeout covers
+the original-PD HOMFLY-PT worker, original-PD Khovanov worker, simplification
+worker, and any simplified-PD HOMFLY-PT or Khovanov workers that are started
+after simplification finishes. The default is `60`. Use `0` to disable worker
+timeouts. Negative values are rejected.
 
 `--data-folder PATH`
 
@@ -81,7 +82,8 @@ Print the final HOMFLY-PT and Khovanov invariant strings to stderr.
 
 `--verbose`
 
-Print worker status, elapsed time, failure details, timeout details, and
+Print worker status, elapsed time, failure details, timeout details,
+simplified PD code, selected original/simplified invariant sources, and
 successful invariant strings to stderr.
 
 `--help`, `-h`
@@ -95,9 +97,12 @@ Candidate knot names are written to stdout, one name per line.
 Diagnostics, verbose invariant strings, timeout messages, and worker failure
 details are written to stderr.
 
-If one invariant computation fails or times out but the other succeeds, lookup
-continues with the successful invariant. If both computations fail or time out,
-the program exits with status `2`.
+For each invariant type, the original-PD and simplified-PD computations race
+when both are available. The first successful HOMFLY-PT result is used and the
+other HOMFLY-PT worker is cancelled; Khovanov follows the same rule. If one
+invariant type fails or times out but the other succeeds, lookup continues with
+the successful invariant. If both invariant types fail or time out, the program
+exits with status `2`.
 
 Pressing `Ctrl+C` requests a clean shutdown. Active worker processes are
 terminated and the program exits with status `130`.

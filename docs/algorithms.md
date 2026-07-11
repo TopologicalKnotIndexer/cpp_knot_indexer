@@ -44,10 +44,30 @@ The worker output is a normalized integral Khovanov string. The main process
 uses that string to query either the SQLite `invariants` table or
 `data/khovanov/sorted_khovanov.txt`.
 
+## Simplification-Aware Invariant Race
+
+Lookup starts three worker processes in parallel:
+
+- HOMFLY-PT on the original canonical PD code
+- Khovanov on the original canonical PD code
+- PD-code simplification using the vendored `cpp-pd-code-simplify` backend
+
+If simplification returns a different PD code, the main process starts
+additional HOMFLY-PT and Khovanov workers on the simplified PD code for any
+invariant type that has not already succeeded.
+
+For each invariant type, original and simplified computations race. The first
+successful HOMFLY-PT worker wins and any other running HOMFLY-PT worker is
+terminated. Khovanov uses the same rule. This preserves correctness because
+simplification is used only to obtain an equivalent, cheaper PD input for the
+same invariant calculation; the lookup still uses HOMFLY-PT and Khovanov
+strings as before.
+
 ## Timeout and Failure Degradation
 
-HOMFLY-PT and Khovanov are computed in separate worker processes. The public
-`--timeout SEC` value applies independently to each worker.
+The public `--timeout SEC` value is a deadline for the full lookup pipeline.
+When the deadline expires, all still-running workers are terminated. Results
+that completed before the deadline remain usable.
 
 If one worker fails or times out and the other succeeds, the main process still
 performs lookup using the successful invariant. If both fail, the lookup fails.

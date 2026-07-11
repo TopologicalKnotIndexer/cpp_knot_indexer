@@ -167,6 +167,7 @@ def build_flags(args: argparse.Namespace, cxx: list[str]) -> tuple[list[str], li
         "-I", str(ROOT / "src" / "link_pd_code"),
         "-I", str(ROOT / "third_party/libhomfly"),
         "-I", str(SQLITE),
+        "-I", str(ROOT / "third_party" / "cpp-pd-code-simplify" / "include"),
     ]
 
     if not args.debug:
