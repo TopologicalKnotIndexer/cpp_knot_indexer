@@ -78,7 +78,9 @@ produced by `knot-indexer-lab`.
 
 `--print-invariants`
 
-Print the final HOMFLY-PT and Khovanov invariant strings to stderr.
+Print the final HOMFLY-PT and Khovanov invariant strings to stderr. If PD-code
+simplification finishes successfully before the timeout, also print the
+simplified PD code to stderr.
 
 `--verbose`
 

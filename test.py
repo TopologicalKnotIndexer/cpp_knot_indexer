@@ -320,6 +320,23 @@ def assert_timeout_degrades(exe: Path) -> None:
         raise AssertionError("negative timeout validation failed")
 
 
+def assert_print_invariants_includes_simplified_pd(exe: Path) -> None:
+    proc = run([
+        str(exe),
+        "--pd-code",
+        "[[1,2,2,1]]",
+        "--timeout",
+        "10",
+        "--print-invariants",
+    ], timeout=30)
+    if proc.returncode != 0:
+        raise AssertionError(f"print-invariants failed\nstdout={proc.stdout}\nstderr={proc.stderr}")
+    if "Khovanov result:" not in proc.stderr or "HOMFLY-PT result:" not in proc.stderr:
+        raise AssertionError(f"print-invariants omitted invariant output\nstderr={proc.stderr}")
+    if "Simplified PD code result: []" not in proc.stderr:
+        raise AssertionError(f"print-invariants omitted simplified PD code\nstderr={proc.stderr}")
+
+
 def assert_simplify_worker(exe: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="cki_simplify_") as tmp:
         tmp_path = Path(tmp)
@@ -697,6 +714,8 @@ def main() -> int:
     print("PASS missing-default-data")
     assert_timeout_degrades(exe)
     print("PASS timeout-cli-contract")
+    assert_print_invariants_includes_simplified_pd(exe)
+    print("PASS print-invariants-simplified-pd")
     assert_simplify_worker(exe)
     print("PASS simplify-worker")
     assert_auxiliary_modules(args.cxx)

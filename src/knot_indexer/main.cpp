@@ -612,6 +612,9 @@ int main(int argc, char** argv) {
         } else if (options.printInvariants) {
             std::cerr << "Khovanov result: " << (khResult.success ? khResult.output : "<failed>") << "\n";
             std::cerr << "HOMFLY-PT result: " << (homResult.success ? homResult.output : "<failed>") << "\n";
+            if (pipeline.simplify.success) {
+                std::cerr << "Simplified PD code result: " << pipeline.simplify.output << "\n";
+            }
         }
 
         if (!khResult.success && !homResult.success) {
