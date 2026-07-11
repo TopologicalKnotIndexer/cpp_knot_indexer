@@ -422,6 +422,54 @@ Bonds
         return 1;
     }
 
+    const char* multi_molecule = R"(
+8 atoms
+8 bonds
+
+Atoms
+
+1 -1 -1 0
+2  1 -1 0
+3  1  1 0
+4 -1  1 0
+5  0 -1.5 1
+6  1.5 0  1
+7  0  1.5 1
+8 -1.5 0  1
+
+Bonds
+
+1 1 1 2
+2 1 2 3
+3 1 3 4
+4 1 4 1
+5 1 5 6
+6 1 6 7
+7 1 7 8
+8 1 8 5
+)";
+    auto coordinate_link = cki::che_to_coord::parseCoordinateLinkText(multi_molecule);
+    if (coordinate_link.size() != 2 || coordinate_link[0].size() != 4 || coordinate_link[1].size() != 4) {
+        std::cerr << "unexpected multi-component coordinate link\n";
+        return 9;
+    }
+    bool single_loop_rejected = false;
+    try {
+        (void)cki::che_to_coord::parseCoordinateLoopText(multi_molecule);
+    } catch (const cki::che_to_coord::ParseError&) {
+        single_loop_rejected = true;
+    }
+    if (!single_loop_rejected) {
+        std::cerr << "multi-component molecule was accepted as a single loop\n";
+        return 10;
+    }
+    auto link_text = cki::che_to_coord::formatLinkCoordinateText(coordinate_link);
+    auto parsed_multi_link = cki::link_pd_code::parseLinkCoordinateText(link_text);
+    if (parsed_multi_link.size() != 2) {
+        std::cerr << "formatted multi-component link was not parsed correctly\n";
+        return 11;
+    }
+
     const char* broken = R"(
 3 atoms
 2 bonds
@@ -491,6 +539,16 @@ Bonds
         std::cerr << "isolated component encoding failed: "
                   << cki::link_pd_code::formatPDCode(degenerate) << "\n";
         return 6;
+    }
+
+    cki::link_pd_code::Options multi_options;
+    multi_options.direction = cki::link_pd_code::Point3{0.0, 0.0, 1.0};
+    multi_options.prefer_min_crossings = false;
+    auto multi_pd = cki::link_pd_code::computePDCode(parsed_multi_link, multi_options);
+    if (multi_pd.empty() || !cki::link_pd_code::validatePDCode(multi_pd)) {
+        std::cerr << "multi-component PD code failed: "
+                  << cki::link_pd_code::formatPDCode(multi_pd) << "\n";
+        return 12;
     }
 
     cki::link_pd_code::Options robust_options;
@@ -625,6 +683,52 @@ Bonds
         if crossing_pd.returncode != 0 or not crossing_pd.stdout.strip().startswith("[["):
             raise AssertionError(
                 f"link_pd_code crossing output failed\nstdout={crossing_pd.stdout}\nstderr={crossing_pd.stderr}"
+            )
+
+        multi_molecule = r'''
+8 atoms
+8 bonds
+
+Atoms
+
+1 -1 -1 0
+2  1 -1 0
+3  1  1 0
+4 -1  1 0
+5  0 -1.5 1
+6  1.5 0  1
+7  0  1.5 1
+8 -1.5 0  1
+
+Bonds
+
+1 1 1 2
+2 1 2 3
+3 1 3 4
+4 1 4 1
+5 1 5 6
+6 1 6 7
+7 1 7 8
+8 1 8 5
+'''
+        multi_che = run([str(che_exe)], stdin=multi_molecule, timeout=30)
+        if multi_che.returncode != 0:
+            raise AssertionError(
+                f"che_to_coord multi-component executable failed\n"
+                f"stdout={multi_che.stdout}\nstderr={multi_che.stderr}"
+            )
+        multi_lines = [line.strip() for line in multi_che.stdout.splitlines() if line.strip()]
+        if len(multi_lines) != 11 or multi_lines[0] != "2" or multi_lines[1] != "4" or multi_lines[6] != "4":
+            raise AssertionError(f"unexpected multi-component link output: {multi_che.stdout!r}")
+
+        multi_pd = run(
+            [str(link_exe), "--direction", "0", "0", "1"],
+            stdin=multi_che.stdout,
+            timeout=30,
+        )
+        if multi_pd.returncode != 0 or not multi_pd.stdout.strip().startswith("[["):
+            raise AssertionError(
+                f"link_pd_code multi-component output failed\nstdout={multi_pd.stdout}\nstderr={multi_pd.stderr}"
             )
 
         unicode_dir = Path(tmp) / "tool_\u4e2d\u6587\u8def\u5f84_\U0001f4c1"

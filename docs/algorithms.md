@@ -208,10 +208,13 @@ Names from both data sources pass through `NameNormalizer`, which applies the
 
 `src/che_to_coord` implements the molecule data parser. It reads `Atoms` and
 `Bonds` sections, accepts compact `id x y z` rows and common LAMMPS atom row
-layouts, then validates that the bond graph is one connected degree-2 cycle.
+layouts, then validates that every connected component of the bond graph is a
+degree-2 cycle.
 
-The output is a coordinate loop ordered along the molecular cycle. Invalid
-input produces `cki::che_to_coord::ParseError` instead of assertion failures.
+The output is an ordered coordinate link. Single-component callers can keep
+using the loop API; multi-component callers use `CoordinateLink` and the link
+format accepted by `link_pd_code`. Invalid input produces
+`cki::che_to_coord::ParseError` instead of assertion failures.
 
 ## Coordinates to PD Code
 
@@ -222,7 +225,8 @@ The algorithmic path is:
 
 1. Project one or more ordered 3D polygon components to a candidate 2D plane.
 2. Reject non-generic projections.
-3. Find projected segment intersections with AABB/sweep broad-phase pruning.
+3. Find projected segment intersections with an active sweep over AABB ranges
+   and y-interval pruning.
 4. Sort crossing occurrences along each oriented component.
 5. Assign strand labels.
 6. Encode each crossing from the incoming under-strand and clockwise half-edge
@@ -247,7 +251,7 @@ Local fixes compared with the upstream project:
   option to reproduce upstream-style degenerate isolated component encoding
 
 The exact rational fallback is intentionally not used for every segment pair.
-The common path still uses the existing AABB/sweep pruning and double arithmetic
-for clearly separated cases. Exact arithmetic is invoked only when the interval
-filter marks the determinant or unit-interval boundary classification as
-uncertain.
+The common path still uses active-sweep AABB pruning, y-interval filtering, and
+double arithmetic for clearly separated cases. Exact arithmetic is invoked only
+when the interval filter marks the determinant or unit-interval boundary
+classification as uncertain.
