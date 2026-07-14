@@ -107,7 +107,7 @@ If you use this repository in academic work, please cite it as:
 
 ```bibtex
 @software{topologicalknotindexer_cpp_knot_indexer,
-  author = {{TopologicalKnotIndexer contributors}},
+  author = {{GGN\_2015}},
   title = {{cpp\_knot\_indexer}},
   year = {2026},
   url = {https://github.com/TopologicalKnotIndexer/cpp_knot_indexer}
